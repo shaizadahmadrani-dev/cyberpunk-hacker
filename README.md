@@ -35,6 +35,10 @@ claude plugin uninstall cyberpunk-hacker@shaiz-mods
 claude plugin marketplace remove shaiz-mods
 ```
 
+## License
+
+[MIT](LICENSE). The license covers this code only.
+
 ## Note
 
 Unofficial fan art. This project is not affiliated with or endorsed by Anthropic; Claude and its mascot belong to Anthropic.
