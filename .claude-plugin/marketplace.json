@@ -1,0 +1,5 @@
+{
+  "name": "shaiz-mods",
+  "owner": { "name": "shaiz" },
+  "plugins": [{ "name": "cyberpunk-hacker", "source": "./" }]
+}
