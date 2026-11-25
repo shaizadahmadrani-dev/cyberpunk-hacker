@@ -1,4 +1,14 @@
-import type { Register, ThemeMessageRule, ThemeSetArgs } from 'claude-code'
+import type {
+  HookStream,
+  ProcessSpawnChunk,
+  ProcessSpawnResult,
+  PromptEditInput,
+  Register,
+  ThemeAmbience,
+  ThemeMessageRule,
+  ThemeSetArgs,
+  ThemeSound,
+} from 'claude-code'
 
 import { PULSE, RECEIVED, SENT } from './hud.js'
 import { makeColors } from './make-colors.js'
@@ -124,37 +134,128 @@ const LOOK: ThemeSetArgs = {
   },
 }
 
-// Two soft sounds, made by the app from these numbers once the person turns the theme's sound on.
-// Sending: a low, damped thock with a breath of noise, like one key of a heavy keyboard.
-// Claude done: three small bells rising over a warm low note, in a little room.
-const HEARD: ThemeSetArgs = {
-  ...LOOK,
-  sound: {
-    cues: {
-      send: {
-        reverb: 0.12,
-        layers: [
-          { wave: 'sine', notes: ['A2'], glide: -7, attack: 0.002, release: 0.14, gain: 0.55 },
-          { wave: 'triangle', notes: ['A4'], glide: -12, attack: 0.002, release: 0.05, gain: 0.16 },
-          { wave: 'pink', filter: { type: 'bandpass', hz: 1800 }, attack: 0.002, release: 0.05, gain: 0.14 },
-        ],
-      },
-      done: {
-        reverb: 0.3,
-        layers: [
-          { wave: 'bell', notes: ['E5', 'B5', 'E6'], step: 0.11, attack: 0.004, release: 0.9, gain: 0.3 },
-          { wave: 'sine', notes: ['E3'], attack: 0.02, release: 0.7, gain: 0.2 },
-          { wave: 'pink', filter: { type: 'lowpass', hz: 900 }, attack: 0.01, release: 0.18, gain: 0.08 },
-        ],
-      },
-    },
+// The cues, made by the app from these numbers once the person turns the theme's sound on. All but the error's
+// clash sit in E minor pentatonic, so any two that overlap still agree.
+const CUES: NonNullable<ThemeSound['cues']> = {
+  // Sending: a low, damped thock with a breath of noise, like one key of a heavy keyboard.
+  send: {
+    reverb: 0.12,
+    layers: [
+      { wave: 'sine', notes: ['A2'], glide: -7, attack: 0.002, release: 0.14, gain: 0.55 },
+      { wave: 'triangle', notes: ['A4'], glide: -12, attack: 0.002, release: 0.05, gain: 0.16 },
+      { wave: 'pink', filter: { type: 'bandpass', hz: 1800 }, attack: 0.002, release: 0.05, gain: 0.14 },
+    ],
+  },
+  // Claude done: three small bells rising over a warm low note, in a little room.
+  done: {
+    reverb: 0.3,
+    layers: [
+      { wave: 'bell', notes: ['E5', 'B5', 'E6'], step: 0.11, attack: 0.004, release: 0.9, gain: 0.3 },
+      { wave: 'sine', notes: ['E3'], attack: 0.02, release: 0.7, gain: 0.2 },
+      { wave: 'pink', filter: { type: 'lowpass', hz: 900 }, attack: 0.01, release: 0.18, gain: 0.08 },
+    ],
+  },
+  // A tool call: it comes often, so one tiny data blip, barely there.
+  tool: {
+    layers: [
+      { wave: 'triangle', notes: ['E6'], glide: 4, attack: 0.002, release: 0.04, gain: 0.07, filter: { type: 'lowpass', hz: 4000 } },
+    ],
+  },
+  // A prompt or question waiting: two notes rising, a fourth apart, like a terminal asking for input.
+  ask: {
+    reverb: 0.2,
+    layers: [
+      { wave: 'triangle', notes: ['B4', 'E5'], step: 0.09, attack: 0.004, release: 0.22, gain: 0.22 },
+      { wave: 'sine', notes: ['B3', 'E4'], step: 0.09, attack: 0.004, release: 0.3, gain: 0.12 },
+    ],
+  },
+  // The turn failed: a short glitch, two clashing low tones sliding down under a crackle of static.
+  error: {
+    reverb: 0.15,
+    layers: [
+      { wave: 'saw', notes: ['E3'], glide: -5, attack: 0.004, release: 0.35, gain: 0.12, filter: { type: 'lowpass', hz: 900, to: 250 } },
+      { wave: 'square', notes: ['F3'], glide: -5, attack: 0.004, release: 0.3, gain: 0.06, filter: { type: 'lowpass', hz: 700, to: 200 } },
+      { wave: 'crackle', attack: 0.002, release: 0.12, gain: 0.1 },
+    ],
+  },
+  // The conversation compacted: a breath of noise sweeping down while one note falls an octave, data packed away.
+  compact: {
+    reverb: 0.25,
+    layers: [
+      { wave: 'pink', filter: { type: 'bandpass', hz: 3500, to: 400 }, attack: 0.04, release: 0.55, gain: 0.16 },
+      { wave: 'sine', notes: ['E5'], glide: -12, attack: 0.01, release: 0.5, gain: 0.1 },
+    ],
+  },
+  // A click on the city: a bell whose note climbs from the left edge to the right, so the skyline plays a scale.
+  click: {
+    reverb: 0.3,
+    layers: [
+      { wave: 'bell', notes: ['E4', 'G4', 'A4', 'B4', 'D5', 'E5', 'G5', 'A5', 'B5', 'D6'], attack: 0.003, release: 0.7, gain: 0.16 },
+      { wave: 'sine', notes: ['E3', 'G3', 'A3', 'B3', 'D4', 'E4', 'G4', 'A4', 'B4', 'D5'], attack: 0.005, release: 0.4, gain: 0.06 },
+    ],
   },
 }
 
-// From the whole look down to what the oldest build takes: a build refuses a set that names an attribute it lacks.
-const LOOKS = [HEARD, LOOK, BASE] as const
+// Behind the session: the storm over the city. Rain on the glass, a low neon hum that breathes, and now and then a
+// far-off signal pinging between the towers. Quiet enough to work beside for hours; the person can turn it off and
+// keep the cues.
+const AMBIENCE: ThemeAmbience = {
+  reverb: 0.3,
+  layers: [
+    // Rain: a soft wash that opens and closes over 16 s, and drops ticking on the window.
+    { wave: 'pink', drone: true, filter: { type: 'lowpass', hz: 1400, to: 2200 }, gain: 0.1 },
+    { wave: 'crackle', scatter: 4, filter: { type: 'highpass', hz: 2000 }, attack: 0.002, release: 0.04, gain: 0.05, pan: -0.3 },
+    // Neon hum: two low notes, swelling slowly.
+    { wave: 'sine', drone: true, notes: ['E2', 'B2'], filter: { type: 'lowpass', hz: 300 }, tremolo: { hz: 0.15, depth: 0.5 }, gain: 0.07 },
+    // A distant signal: one soft bell about every 20 s.
+    { wave: 'bell', notes: ['E5', 'G5', 'A5', 'B5', 'D6'], scatter: 0.05, attack: 0.01, release: 2, gain: 0.05, pan: 0.4 },
+  ],
+}
+
+const AMBIENT: ThemeSetArgs = { ...LOOK, sound: { ambience: AMBIENCE, cues: CUES } }
+// The cues alone, should a build find the ambience too costly.
+const HEARD: ThemeSetArgs = { ...LOOK, sound: { cues: CUES } }
+
+// From the whole look down to what the oldest build takes: a build refuses a set that names an attribute it lacks,
+// or a sound out of range or too costly, and says why in the log.
+const LOOKS = [AMBIENT, HEARD, LOOK, BASE] as const
+
+// Typing in the prompt box makes soft, low sounds, ASMR style: for a letter, a muffled two-stage thock with a small
+// electronic pop (one of eight keys, each a little left or right, never the same twice running); for a space, a deeper
+// thock with a puff of air; a soft bloop falling away for a deletion and a low whoomp for a paste. A cursor move makes
+// no sound.
+const TAPS = ['tap1', 'tap2', 'tap3', 'tap4', 'tap5', 'tap6', 'tap7', 'tap8'] as const
+
+// The sound for an edit, given the `last` one played: a letter strikes any key but that one.
+const soundFor = (e: PromptEditInput, last: string | undefined): string | undefined => {
+  if (e.inputText === '') {
+    return e.end > e.start ? 'zip' : undefined
+  }
+
+  if (e.inputText.length > 1) {
+    return 'bloom'
+  }
+
+  if (e.inputText === ' ') {
+    return 'breath'
+  }
+
+  const others = TAPS.filter(tap => tap !== last)
+  return others[Math.floor(Math.random() * others.length)]
+}
+
+const TYPING_KEY = 'typing-sounds'
 
 export const register: Register = on => {
+  // The engine plays no clip on Windows, so a small PowerShell process plays the typing sounds. It watches a signal
+  // file, and each key writes a fresh line to it: a stamp and the sound's name.
+  let isTypingOn = true
+  let player: HookStream<ProcessSpawnChunk, ProcessSpawnResult> | undefined
+  let signal: string | undefined
+  let lastSound: string | undefined
+  let taps = 0
+  const run = Date.now()
+
   on('session.start', async ($, e, next) => {
     const unpainted = problems.find(line => line.startsWith("Desktop won't paint"))
 
@@ -175,6 +276,78 @@ export const register: Register = on => {
 
     if (set !== undefined && !set.isDrawn) {
       $.ui.status(set.reason)
+    }
+
+    await $.command.register({ name: 'typing-sounds', description: 'Turn the typing sounds on or off' })
+    isTypingOn = (await $.store.get(TYPING_KEY)) !== false
+
+    // The player lives as long as this module, or until the sounds are turned off. Where powershell.exe is missing,
+    // as off Windows, the spawn fails and typing stays silent.
+    const env = await $.process.hookEnv()
+    const data = env.CLAUDE_PLUGIN_DATA
+
+    if (isTypingOn && data !== undefined) {
+      void (async () => {
+        try {
+          player = $.process.spawn({
+            argv: [
+              'powershell.exe',
+              '-NoProfile',
+              '-NonInteractive',
+              '-ExecutionPolicy',
+              'Bypass',
+              '-WindowStyle',
+              'Hidden',
+              '-File',
+              `${$.plugin.root}/hooks/typing.ps1`,
+            ],
+            env: {
+              TYPING_SOUNDS: `${$.plugin.root}/sounds`,
+              TYPING_SIGNAL: `${data}/typing.signal`,
+              TYPING_PARENT: env.CLAUDE_PID ?? '',
+            },
+          })
+
+          for await (const { stream, text } of player) {
+            if (stream === 'stdout' && text.startsWith('ready')) {
+              signal = `${data}/typing.signal`
+            } else {
+              $.ui.log(`typing sounds: ${stream}: ${text.trim()}`, { to: 'debug' })
+            }
+          }
+        } catch (error) {
+          $.ui.log(`typing sounds: the player did not start: ${String(error)}`, { to: 'debug' })
+        }
+
+        player = undefined
+        signal = undefined
+      })()
+    }
+
+    return next(e)
+  })
+
+  on('command.run', { command: 'typing-sounds' }, async $ => {
+    isTypingOn = !isTypingOn
+    await $.store.set(TYPING_KEY, isTypingOn)
+
+    if (!isTypingOn) {
+      // Ending the stream ends the player.
+      void player?.return({ code: null, signal: null })
+
+      return { text: 'Typing sounds off.' }
+    }
+
+    return { text: player === undefined ? 'Typing sounds on from the next session.' : 'Typing sounds on.' }
+  })
+
+  on('prompt.edit', ($, e, next) => {
+    const sound = isTypingOn ? soundFor(e, lastSound) : undefined
+
+    if (sound !== undefined && signal !== undefined) {
+      lastSound = sound
+      taps += 1
+      void $.fs.write(signal, `${run}.${taps} ${sound}`).catch(() => undefined)
     }
 
     return next(e)
